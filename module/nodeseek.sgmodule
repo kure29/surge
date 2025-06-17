@@ -4,19 +4,20 @@
 #!homepage=https://github.com/your-username/surge-modules
 #!icon=https://raw.githubusercontent.com/your-username/surge-modules/main/icons/nodeseek.png
 #!system=ios
-#!arguments=cookie:[请填入Cookie],cron:0 9 * * *,auto_refresh:true
+#!arguments=cookie:[请填入Cookie],cron:0 9 * * *,auto_refresh:true,silent_mode:true
 
 [Argument]
 cookie = type=text,desc="NodeSeek Cookie（留空则自动获取）"
 cron = type=text,desc="签到时间设置（Cron 表达式）",default="0 9 * * *"
 auto_refresh = type=switch,desc="Cookie 失效时自动刷新",default=true
+silent_mode = type=switch,desc="静默模式（获取Cookie时不提醒）",default=true
 
 [Script]
 # 智能获取 Cookie（仅在需要时触发）
-nodeseek-cookie = type=http-request,pattern=^https?:\/\/(www\.)?nodeseek\.com,requires-body=0,max-size=0,script-path=https://raw.githubusercontent.com/kure29/surge/refs/heads/main/script/nodeseek-auto.js,argument=cookie={{{cookie}}}&auto_refresh={{{auto_refresh}}}
+nodeseek-cookie = type=http-request,pattern=^https?:\/\/(www\.)?nodeseek\.com,requires-body=0,max-size=0,script-path=https://raw.githubusercontent.com/kure29/surge/refs/heads/main/script/nodeseek-auto.js,argument=cookie={{{cookie}}}&auto_refresh={{{auto_refresh}}}&silent_mode={{{silent_mode}}}
 
 # 定时签到任务
-nodeseek-checkin = type=cron,cronexp="{{{cron}}}",script-path=https://raw.githubusercontent.com/kure29/surge/refs/heads/main/script/nodeseek-auto.js,argument=cookie={{{cookie}}}&auto_refresh={{{auto_refresh}}}
+nodeseek-checkin = type=cron,cronexp="{{{cron}}}",script-path=https://raw.githubusercontent.com/kure29/surge/refs/heads/main/script/nodeseek-auto.js,argument=cookie={{{cookie}}}&auto_refresh={{{auto_refresh}}}&silent_mode={{{silent_mode}}}
 
 [MITM]
 hostname = %APPEND% *.nodeseek.com, nodeseek.com
