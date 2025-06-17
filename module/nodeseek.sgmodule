@@ -1,1 +1,43 @@
+#!name=NodeSeek 自动签到
+#!desc=NodeSeek 自动获取 Cookie 和签到模块
+#!author=Assistant
+#!homepage=https://github.com/your-username/surge-modules
+#!icon=https://raw.githubusercontent.com/your-username/surge-modules/main/icons/nodeseek.png
+#!system=ios,mac
 
+# NodeSeek 自动签到模块
+# 功能：自动获取 Cookie 并定时签到
+# 使用方法：在 Surge 中安装此模块即可
+
+[Script]
+# 自动获取 Cookie（访问 NodeSeek 时触发）
+nodeseek-cookie = type=http-request,pattern=^https?:\/\/(www\.)?nodeseek\.com,requires-body=0,max-size=0,script-path=https://raw.githubusercontent.com/your-username/surge-scripts/main/nodeseek-auto.js
+
+# 定时签到任务（每天上午9点执行）
+# 可以通过参数自定义时间，例如：argument=cron=0 8 * * *
+nodeseek-checkin = type=cron,cron="0 9 * * *",script-path=https://raw.githubusercontent.com/your-username/surge-scripts/main/nodeseek-auto.js
+
+[MITM]
+hostname = %APPEND% *.nodeseek.com, nodeseek.com
+
+[Panel]
+# 添加面板快捷操作
+nodeseek-panel = script-name=nodeseek-checkin,update-interval=3600
+
+# 使用说明：
+# 1. 将此文件保存为 NodeSeek.sgmodule
+# 2. 在 Surge 中通过「模块」-> 「安装新模块」-> 「从 URL 安装模块」
+# 3. 输入模块 URL 或选择本地文件安装
+# 4. 启用模块后，访问 NodeSeek 网站即可自动获取 Cookie
+# 5. 系统会根据设定时间自动签到
+
+# 自定义配置：
+# - 修改 cron 表达式可改变签到时间
+# - 可以通过 argument 参数传递自定义配置
+# - 支持多账号配置（需要修改脚本支持）
+
+# 故障排除：
+# - 确保网络连接正常
+# - 检查脚本 URL 是否可访问  
+# - 查看 Surge 日志了解详细错误信息
+# - Cookie 过期时会自动提示重新获取
