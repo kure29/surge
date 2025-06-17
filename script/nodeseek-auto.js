@@ -1,28 +1,31 @@
 /*
 文件名：nodeseek-auto.js
-NodeSeek 自动获取 Cookie 和签到模块
+NodeSeek 手动获取 Cookie 和自动签到模块
 
-功能：
-1. 自动拦截并保存访问 NodeSeek 时的 Cookie
-2. 定时自动签到
+新逻辑：
+1. 移除自动拦截获取 Cookie 的功能
+2. 改为手动执行脚本获取 Cookie
+3. 支持一键获取当前浏览器中的 Cookie
+4. 定时自动签到功能保持不变
 
 配置方法：
-1. 在 Surge 配置中添加以下内容：
-
 [Script]
-# 自动获取 Cookie（访问 NodeSeek 时触发）
-nodeseek-cookie = type=http-request,pattern=^https?:\/\/(www\.)?nodeseek\.com,requires-body=0,max-size=0,script-path=nodeseek-auto.js
+# 手动获取 Cookie（在 Surge 中手动运行）
+nodeseek-cookie = type=http-request,pattern=^https?:\/\/manual-cookie-get\.local,requires-body=0,max-size=0,script-path=nodeseek-auto.js,argument=action=getCookie
 
 # 定时签到任务
-nodeseek-checkin = type=cron,cron="0 9 * * *",script-path=nodeseek-auto.js
+nodeseek-checkin = type=cron,cronexp="0 9 * * *",script-path=nodeseek-auto.js,argument=action=checkin
+
+# 手动签到（可选）
+nodeseek-manual = type=http-request,pattern=^https?:\/\/manual-checkin\.local,requires-body=0,max-size=0,script-path=nodeseek-auto.js,argument=action=checkin
 
 [MITM]
 hostname = *.nodeseek.com
 
-使用说明：
-- 首次使用时，访问一次 NodeSeek 网站即可自动获取 Cookie
-- 之后每天会自动签到
-- 如需手动执行签到，可在 Surge 中运行脚本
+使用方法：
+1. 登录 NodeSeek 网站后，在 Surge 中手动运行 "nodeseek-cookie" 脚本获取 Cookie
+2. 或者访问 http://manual-cookie-get.local 触发获取
+3. 之后每天自动签到，无需手动操作
 
 作者：Assistant
 */
@@ -31,63 +34,190 @@ const $ = new Env('NodeSeek');
 
 // 配置信息
 const config = {
-    // 域名匹配
     domain: 'nodeseek.com',
-    // 签到相关URL（需要根据实际情况调整）
     checkinUrl: 'https://www.nodeseek.com/api/attendance',
-    // Cookie 存储 key
     cookieKey: 'nodeseek_cookie',
-    // 用户信息存储 key
-    userInfoKey: 'nodeseek_userinfo'
+    userInfoKey: 'nodeseek_userinfo',
+    lastUpdateKey: 'nodeseek_cookie_time'
 };
 
-// 主函数 - 根据运行环境执行不同逻辑
+// 主函数
 async function main() {
-    // 判断运行环境
+    // 获取参数
+    const action = getArgument('action');
+    
     if (typeof $request !== 'undefined') {
-        // HTTP 请求环境 - 获取 Cookie
-        await getCookie();
+        // HTTP 请求环境
+        const url = $request.url;
+        if (url.includes('manual-cookie-get.local')) {
+            await manualGetCookie();
+        } else if (url.includes('manual-checkin.local')) {
+            await performCheckin();
+        }
     } else {
-        // Cron 定时任务环境 - 执行签到
-        await performCheckin();
+        // Cron 环境或手动执行
+        if (action === 'getCookie') {
+            await manualGetCookie();
+        } else {
+            // 默认执行签到
+            await performCheckin();
+        }
     }
 }
 
-// 获取并保存 Cookie
-async function getCookie() {
+// 手动获取 Cookie（从当前 NodeSeek 页面）
+async function manualGetCookie() {
     try {
-        const url = $request.url;
-        const headers = $request.headers;
+        $.log('🔄 开始手动获取 NodeSeek Cookie');
         
-        // 检查是否是 NodeSeek 域名
-        if (!url.includes(config.domain)) {
-            $.log('🔍 非目标域名，跳过');
-            return;
+        // 方法1：如果有 $request，从请求中获取
+        if (typeof $request !== 'undefined' && $request.headers) {
+            const cookie = $request.headers['Cookie'] || $request.headers['cookie'] || '';
+            if (cookie && cookie.includes('nodeseek')) {
+                await saveCookie(cookie);
+                return;
+            }
         }
         
-        // 获取 Cookie
-        const cookie = headers['Cookie'] || headers['cookie'] || '';
+        // 方法2：尝试从 NodeSeek 获取当前会话
+        $.log('🌐 尝试从 NodeSeek 获取当前会话信息');
+        await getCookieFromNodeSeek();
         
-        if (cookie) {
-            // 保存 Cookie
-            $.setdata(cookie, config.cookieKey);
-            $.log('🍪 Cookie 已更新保存');
-            
-            // 提取用户信息（如果URL中包含用户信息）
-            const userInfo = extractUserInfo(url, cookie);
-            if (userInfo) {
-                $.setdata(JSON.stringify(userInfo), config.userInfoKey);
-                $.log(`👤 用户信息已保存: ${userInfo.username || 'Unknown'}`);
+    } catch (error) {
+        $.log(`❌ 手动获取 Cookie 失败: ${error}`);
+        $.msg('NodeSeek Cookie', '获取失败', '请确保已登录 NodeSeek 网站');
+    }
+}
+
+// 从 NodeSeek 网站获取 Cookie
+async function getCookieFromNodeSeek() {
+    try {
+        // 访问 NodeSeek 主页获取 Cookie
+        const response = await $.http.get({
+            url: 'https://www.nodeseek.com/',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1'
             }
-            
-            // 发送通知
-            $.msg('NodeSeek Cookie', '获取成功', '已自动保存登录状态');
+        });
+        
+        // 从响应头中获取 Set-Cookie
+        const setCookies = response.headers['Set-Cookie'] || response.headers['set-cookie'] || [];
+        let combinedCookie = '';
+        
+        if (Array.isArray(setCookies)) {
+            combinedCookie = setCookies.map(cookie => cookie.split(';')[0]).join('; ');
+        } else if (typeof setCookies === 'string') {
+            combinedCookie = setCookies.split(';')[0];
+        }
+        
+        if (combinedCookie) {
+            await saveCookie(combinedCookie);
         } else {
-            $.log('⚠️ 未检测到 Cookie');
+            $.log('⚠️ 未能获取到有效的 Cookie，请手动登录后重试');
+            $.msg('NodeSeek Cookie', '获取失败', '请先在浏览器中登录 NodeSeek，然后重试');
         }
         
     } catch (error) {
-        $.log(`❌ 获取 Cookie 失败: ${error}`);
+        $.log(`❌ 从 NodeSeek 获取 Cookie 失败: ${error}`);
+        $.msg('NodeSeek Cookie', '获取失败', '网络请求失败，请检查网络连接');
+    }
+}
+
+// 保存 Cookie
+async function saveCookie(cookie) {
+    try {
+        if (!cookie) {
+            $.log('❌ Cookie 为空');
+            return false;
+        }
+        
+        // 验证 Cookie 是否有效
+        $.log('🔍 验证 Cookie 有效性...');
+        const isValid = await validateCookie(cookie);
+        
+        if (!isValid) {
+            $.log('❌ Cookie 无效或已过期');
+            $.msg('NodeSeek Cookie', '获取失败', 'Cookie 无效，请重新登录');
+            return false;
+        }
+        
+        // 保存 Cookie 和时间戳
+        $.setdata(cookie, config.cookieKey);
+        $.setdata(Date.now().toString(), config.lastUpdateKey);
+        
+        $.log('✅ Cookie 已成功保存');
+        
+        // 获取用户信息
+        const userInfo = await getUserInfo(cookie);
+        if (userInfo) {
+            $.setdata(JSON.stringify(userInfo), config.userInfoKey);
+            $.log(`👤 用户信息已保存: ${userInfo.username || 'Unknown'}`);
+            $.msg('NodeSeek Cookie', '获取成功', `用户: ${userInfo.username || 'Unknown'}`);
+        } else {
+            $.msg('NodeSeek Cookie', '获取成功', '已保存登录状态');
+        }
+        
+        return true;
+        
+    } catch (error) {
+        $.log(`❌ 保存 Cookie 失败: ${error}`);
+        $.msg('NodeSeek Cookie', '保存失败', error.toString());
+        return false;
+    }
+}
+
+// 验证 Cookie 有效性
+async function validateCookie(cookie) {
+    try {
+        const response = await $.http.get({
+            url: 'https://www.nodeseek.com/api/user/info',
+            headers: {
+                'Cookie': cookie,
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1',
+                'Accept': 'application/json, text/plain, */*',
+                'Referer': 'https://www.nodeseek.com/'
+            }
+        });
+        
+        $.log(`🔍 Cookie 验证响应状态: ${response.status}`);
+        return response.status === 200;
+        
+    } catch (error) {
+        $.log(`⚠️ Cookie 验证失败: ${error}`);
+        return false;
+    }
+}
+
+// 获取用户信息
+async function getUserInfo(cookie) {
+    try {
+        const response = await $.http.get({
+            url: 'https://www.nodeseek.com/api/user/info',
+            headers: {
+                'Cookie': cookie,
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15',
+                'Accept': 'application/json',
+                'Referer': 'https://www.nodeseek.com/'
+            }
+        });
+        
+        if (response.status === 200) {
+            try {
+                const data = JSON.parse(response.body);
+                return {
+                    username: data.username || data.name || data.user?.name,
+                    id: data.id || data.user?.id,
+                    email: data.email || data.user?.email
+                };
+            } catch (e) {
+                $.log('⚠️ 解析用户信息失败');
+            }
+        }
+        
+        return null;
+    } catch (error) {
+        $.log(`⚠️ 获取用户信息失败: ${error}`);
+        return null;
     }
 }
 
@@ -96,12 +226,21 @@ async function performCheckin() {
     try {
         $.log('🚀 开始执行 NodeSeek 签到任务');
         
-        // 获取保存的 Cookie
         const cookie = $.getdata(config.cookieKey);
-        
         if (!cookie) {
             $.log('❌ 未找到保存的 Cookie');
-            $.msg('NodeSeek 签到', '失败', '请先访问 NodeSeek 网站获取 Cookie');
+            $.msg('NodeSeek 签到', '失败', '请先手动获取 Cookie');
+            return;
+        }
+        
+        // 验证 Cookie 是否仍然有效
+        const isValid = await validateCookie(cookie);
+        if (!isValid) {
+            $.log('❌ Cookie 已过期');
+            $.msg('NodeSeek 签到', '失败', 'Cookie 已过期，请重新获取');
+            // 清除过期 Cookie
+            $.setdata('', config.cookieKey);
+            $.setdata('', config.lastUpdateKey);
             return;
         }
         
@@ -117,10 +256,11 @@ async function performCheckin() {
             $.log('❌ 签到失败');
             $.msg('NodeSeek 签到', '失败', result.message || '签到过程中出现错误');
             
-            // 如果是 Cookie 过期，清除保存的 Cookie
-            if (result.message && result.message.includes('登录')) {
+            // 如果是认证问题，清除 Cookie
+            if (result.needReauth) {
                 $.setdata('', config.cookieKey);
-                $.log('🗑️ 已清除过期的 Cookie');
+                $.setdata('', config.lastUpdateKey);
+                $.log('🗑️ 已清除无效的 Cookie');
             }
         }
         
@@ -145,22 +285,21 @@ async function checkin(cookie) {
                 'X-Requested-With': 'XMLHttpRequest'
             },
             method: 'POST',
-            body: JSON.stringify({}) // 根据实际需求调整
+            body: JSON.stringify({})
         };
 
         $.http.post(options).then(response => {
             const { status, body } = response;
             
             try {
-                $.log(`📝 响应状态: ${status}`);
-                $.log(`📝 响应内容: ${body}`);
+                $.log(`📝 签到响应状态: ${status}`);
+                $.log(`📝 签到响应内容: ${body}`);
                 
-                // 尝试解析 JSON 响应
                 let data = {};
                 try {
                     data = JSON.parse(body);
                 } catch (e) {
-                    // 如果不是 JSON，检查 HTML 响应
+                    // HTML 响应处理
                     if (body.includes('签到成功') || body.includes('check-in successful')) {
                         resolve({ success: true, message: '签到成功' });
                         return;
@@ -170,7 +309,7 @@ async function checkin(cookie) {
                     }
                 }
                 
-                // 根据不同的响应格式判断结果
+                // JSON 响应处理
                 if (status === 200) {
                     if (data.success === true || data.code === 0 || data.status === 'success') {
                         resolve({
@@ -191,7 +330,8 @@ async function checkin(cookie) {
                 } else if (status === 401 || status === 403) {
                     resolve({
                         success: false,
-                        message: '登录状态已过期，请重新访问网站'
+                        message: '登录状态已过期，请重新获取 Cookie',
+                        needReauth: true
                     });
                 } else {
                     resolve({
@@ -201,14 +341,14 @@ async function checkin(cookie) {
                 }
                 
             } catch (parseError) {
-                $.log(`❌ 解析响应失败: ${parseError}`);
+                $.log(`❌ 解析签到响应失败: ${parseError}`);
                 resolve({
                     success: false,
                     message: '响应解析失败'
                 });
             }
         }).catch(error => {
-            $.log(`❌ 请求失败: ${error}`);
+            $.log(`❌ 签到请求失败: ${error}`);
             resolve({
                 success: false,
                 message: `网络请求失败: ${error}`
@@ -217,35 +357,18 @@ async function checkin(cookie) {
     });
 }
 
-// 提取用户信息
-function extractUserInfo(url, cookie) {
-    try {
-        let userInfo = {};
-        
-        // 从 Cookie 中提取用户信息
-        const cookiePairs = cookie.split(';');
-        for (const pair of cookiePairs) {
-            const [key, value] = pair.trim().split('=');
-            if (key && value) {
-                if (key.toLowerCase().includes('user') || key.toLowerCase().includes('name')) {
-                    userInfo[key] = decodeURIComponent(value);
-                }
+// 获取脚本参数
+function getArgument(key) {
+    if (typeof $argument !== 'undefined' && $argument) {
+        const pairs = $argument.split('&');
+        for (const pair of pairs) {
+            const [k, v] = pair.split('=');
+            if (k === key) {
+                return v;
             }
         }
-        
-        // 从 URL 中提取信息（如果有的话）
-        if (url.includes('/user/') || url.includes('/profile/')) {
-            const matches = url.match(/\/(?:user|profile)\/([^\/\?]+)/);
-            if (matches) {
-                userInfo.username = matches[1];
-            }
-        }
-        
-        return Object.keys(userInfo).length > 0 ? userInfo : null;
-    } catch (error) {
-        $.log(`❌ 提取用户信息失败: ${error}`);
-        return null;
     }
+    return null;
 }
 
 // Surge 环境适配函数
@@ -271,6 +394,25 @@ function Env(name) {
             return false;
         },
         http: {
+            get: (options) => {
+                return new Promise((resolve, reject) => {
+                    if (typeof $httpClient !== 'undefined') {
+                        $httpClient.get(options, (error, response, data) => {
+                            if (error) {
+                                reject(error);
+                            } else {
+                                resolve({
+                                    status: response.status,
+                                    headers: response.headers,
+                                    body: data
+                                });
+                            }
+                        });
+                    } else {
+                        reject('HTTP client not available');
+                    }
+                });
+            },
             post: (options) => {
                 return new Promise((resolve, reject) => {
                     if (typeof $httpClient !== 'undefined') {
