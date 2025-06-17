@@ -49,6 +49,7 @@ function parseArguments() {
     const args = {
         cookie: '',
         auto_refresh: true,
+        silent_mode: true,
         cron: '0 9 * * *'
     };
     
@@ -65,6 +66,9 @@ function parseArguments() {
                     case 'auto_refresh':
                         args.auto_refresh = decodedValue === 'true' || decodedValue === '{{{auto_refresh}}}';
                         break;
+                    case 'silent_mode':
+                        args.silent_mode = decodedValue === 'true' || decodedValue === '{{{silent_mode}}}';
+                        break;
                     case 'cron':
                         args.cron = decodedValue === '{{{cron}}}' ? '0 9 * * *' : decodedValue;
                         break;
@@ -73,7 +77,7 @@ function parseArguments() {
         }
     }
     
-    $.log(`📋 解析参数 - Cookie: ${args.cookie ? '已配置' : '未配置'}, 自动刷新: ${args.auto_refresh}`);
+    $.log(`📋 解析参数 - Cookie: ${args.cookie ? '已配置' : '未配置'}, 自动刷新: ${args.auto_refresh}, 静默模式: ${args.silent_mode}`);
     return args;
 }
 
@@ -103,7 +107,13 @@ async function smartCookieHandler(args) {
         }
         
         $.log('🔍 检测到 Cookie 需要更新，开始获取...');
-        await saveCookie(currentCookie);
+        const success = await saveCookie(currentCookie, args.silent_mode);
+        
+        // 根据静默模式决定是否发送通知
+        if (success && !args.silent_mode) {
+            const userInfo = JSON.parse($.getdata(config.userInfoKey) || '{}');
+            $.msg('NodeSeek Cookie', '获取成功', `用户: ${userInfo.username || 'Unknown'}`);
+        }
         
     } catch (error) {
         $.log(`❌ 智能 Cookie 处理失败: ${error}`);
@@ -189,7 +199,7 @@ async function validateCookie(cookie) {
 }
 
 // 保存 Cookie
-async function saveCookie(cookie) {
+async function saveCookie(cookie, silentMode = true) {
     try {
         if (!cookie || !cookie.includes('nodeseek')) {
             $.log('⚠️ Cookie 格式不正确');
@@ -202,7 +212,10 @@ async function saveCookie(cookie) {
         
         if (!isValid) {
             $.log('❌ 新 Cookie 无效');
-            $.msg('NodeSeek Cookie', '获取失败', 'Cookie 无效，请确认已正确登录');
+            // 根据静默模式决定是否发送通知
+            if (!silentMode) {
+                $.msg('NodeSeek Cookie', '获取失败', 'Cookie 无效，请确认已正确登录');
+            }
             return false;
         }
         
@@ -218,16 +231,27 @@ async function saveCookie(cookie) {
         if (userInfo) {
             $.setdata(JSON.stringify(userInfo), config.userInfoKey);
             $.log(`👤 用户信息已保存: ${userInfo.username || 'Unknown'}`);
-            $.msg('NodeSeek Cookie', '更新成功', `用户: ${userInfo.username || 'Unknown'}`);
+        }
+        
+        // 根据静默模式决定是否发送通知
+        if (!silentMode) {
+            if (userInfo) {
+                $.msg('NodeSeek Cookie', '更新成功', `用户: ${userInfo.username || 'Unknown'}`);
+            } else {
+                $.msg('NodeSeek Cookie', '更新成功', '已保存最新登录状态');
+            }
         } else {
-            $.msg('NodeSeek Cookie', '更新成功', '已保存最新登录状态');
+            $.log('🔕 Cookie 已静默更新，无需通知');
         }
         
         return true;
         
     } catch (error) {
         $.log(`❌ 保存 Cookie 失败: ${error}`);
-        $.msg('NodeSeek Cookie', '保存失败', error.toString());
+        // 根据静默模式决定是否发送通知
+        if (!silentMode) {
+            $.msg('NodeSeek Cookie', '保存失败', error.toString());
+        }
         return false;
     }
 }
