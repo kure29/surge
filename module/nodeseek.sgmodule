@@ -14,10 +14,10 @@ silent_mode = type=switch,desc="静默模式（获取Cookie时不提醒）",defa
 
 [Script]
 # 智能获取 Cookie（仅在需要时触发）
-nodeseek-cookie = type=http-request,pattern=^https?:\/\/(www\.)?nodeseek\.com,requires-body=0,max-size=0,script-path=https://raw.githubusercontent.com/your-username/surge-modules/main/script/nodeseek-auto.js,argument=cookie={{{cookie}}}&auto_refresh={{{auto_refresh}}}&silent_mode={{{silent_mode}}}
+nodeseek-cookie = type=http-request,pattern=^https?:\/\/(www\.)?nodeseek\.com,requires-body=0,max-size=0,script-path=https://raw.githubusercontent.com/kure29/surge/refs/heads/main/script/nodeseek-auto.js,argument=cookie={{{cookie}}}&auto_refresh={{{auto_refresh}}}&silent_mode={{{silent_mode}}}
 
 # 定时签到任务
-nodeseek-checkin = type=cron,cronexp="{{{cron}}}",script-path=https://raw.githubusercontent.com/your-username/surge-modules/main/script/nodeseek-auto.js,argument=cookie={{{cookie}}}&auto_refresh={{{auto_refresh}}}&silent_mode={{{silent_mode}}}
+nodeseek-checkin = type=cron,cronexp="{{{cron}}}",script-path=https://raw.githubusercontent.com/kure29/surge/refs/heads/main/script/nodeseek-auto.js,argument=cookie={{{cookie}}}&auto_refresh={{{auto_refresh}}}&silent_mode={{{silent_mode}}}
 
 [MITM]
 hostname = %APPEND% *.nodeseek.com, nodeseek.com
