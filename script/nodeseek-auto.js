@@ -87,15 +87,19 @@ async function smartCookieHandler(args) {
         const url = $request.url;
         const headers = $request.headers;
         
+        $.log(`🌐 当前访问: ${url}`);
+        
         // 检查是否为 NodeSeek 域名
         if (!url.includes(config.domain)) {
+            $.log('❌ 非 NodeSeek 域名，跳过处理');
             return;
         }
         
         // 检查是否需要获取 Cookie
+        $.log('🔍 开始检查是否需要获取 Cookie...');
         const needsCookie = await shouldGetCookie(args);
         if (!needsCookie) {
-            $.log('🔄 Cookie 仍然有效，跳过获取');
+            $.log('✅ Cookie 仍然有效，跳过获取');
             return;
         }
         
@@ -106,7 +110,7 @@ async function smartCookieHandler(args) {
             return;
         }
         
-        $.log('🔍 检测到 Cookie 需要更新，开始获取...');
+        $.log('🍪 检测到新的 Cookie，开始验证和保存...');
         const success = await saveCookie(currentCookie, args.silent_mode);
         
         // 根据静默模式决定是否发送通知
@@ -123,30 +127,39 @@ async function smartCookieHandler(args) {
 // 判断是否需要获取 Cookie
 async function shouldGetCookie(args) {
     try {
+        $.log('🔍 开始评估 Cookie 状态...');
+        
         // 1. 检查频率限制 - 避免过于频繁的检查
         const lastCheck = $.getdata(config.lastCheckKey) || '0';
         const lastCheckTime = parseInt(lastCheck);
         const now = Date.now();
-        const hoursSinceCheck = (now - lastCheckTime) / (1000 * 60 * 60);
+        const minutesSinceCheck = (now - lastCheckTime) / (1000 * 60);
         
-        if (hoursSinceCheck < config.checkInterval) {
-            $.log(`⏱️ 距离上次检查仅 ${Math.round(hoursSinceCheck * 60)} 分钟，跳过检查`);
+        $.log(`⏱️ 距离上次检查: ${Math.round(minutesSinceCheck)} 分钟`);
+        
+        // 如果距离上次检查不到30分钟，且不是首次检查，跳过
+        if (minutesSinceCheck < 30 && lastCheckTime > 0) {
+            $.log(`⏱️ 距离上次检查仅 ${Math.round(minutesSinceCheck)} 分钟，跳过检查`);
             return false;
         }
         
         // 更新检查时间
         $.setdata(now.toString(), config.lastCheckKey);
+        $.log('📝 已更新检查时间戳');
         
         // 2. 获取当前有效的 Cookie
         let currentCookie = '';
+        let cookieSource = '';
         
         // 优先使用模块配置的 Cookie
         if (args.cookie && args.cookie.trim()) {
             currentCookie = args.cookie.trim();
+            cookieSource = '模块配置';
             $.log('🔧 使用模块配置的 Cookie');
         } else {
             // 使用存储的 Cookie
             currentCookie = $.getdata(config.cookieKey) || '';
+            cookieSource = '本地存储';
             $.log('💾 使用存储的 Cookie');
         }
         
@@ -156,16 +169,24 @@ async function shouldGetCookie(args) {
             return true;
         }
         
+        $.log(`🍪 当前 Cookie 来源: ${cookieSource}`);
+        
         // 4. 验证 Cookie 是否仍然有效
         $.log('🔍 验证当前 Cookie 有效性...');
         const isValid = await validateCookie(currentCookie);
         
         if (!isValid) {
-            $.log('❌ 当前 Cookie 已失效，需要重新获取');
-            return args.auto_refresh; // 只有开启自动刷新才获取
+            $.log('❌ 当前 Cookie 已失效');
+            if (args.auto_refresh) {
+                $.log('🔄 自动刷新已启用，需要重新获取');
+                return true;
+            } else {
+                $.log('🔒 自动刷新已禁用，跳过获取');
+                return false;
+            }
         }
         
-        $.log('✅ Cookie 仍然有效');
+        $.log('✅ Cookie 验证通过，状态良好');
         return false;
         
     } catch (error) {
@@ -189,7 +210,7 @@ async function validateCookie(cookie) {
         });
         
         const isValid = response.status === 200;
-        $.log(`🔍 Cookie 验证结果: ${isValid ? '有效' : '无效'} (状态码: ${response.status})`);
+        $.log(`🔍 Cookie 验证结果: ${isValid ? '✅ 有效' : '❌ 无效'} (状态码: ${response.status})`);
         return isValid;
         
     } catch (error) {
